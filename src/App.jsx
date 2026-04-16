@@ -1,130 +1,374 @@
-import { useEffect, useMemo, useState } from "react";
-
-const STORAGE_KEY = "bosses_v1";
-
-const defaultBosses = [
-  { id: 1, name: "Crimson Wyrm", map: "Ashen Ridge", respawnMinutes: 120, lastKilledAt: null },
-  { id: 2, name: "Frost Colossus", map: "Glacier Vault", respawnMinutes: 180, lastKilledAt: null },
-  { id: 3, name: "Void Reaper", map: "Ruined Chapel", respawnMinutes: 90, lastKilledAt: null },
-];
-
-function formatDuration(ms) {
-  if (ms <= 0) return "Spawned";
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return h > 0 ? `${h}h ${m}m ${sec}s` : `${m}m ${sec}s`;
-}
-
-function formatTime(ts) {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+import { useEffect, useState } from "react";
+import { useAuth } from "./hooks/useAuth";
+import { useBosses } from "./hooks/useBosses";
+import { useNotifications } from "./hooks/useNotifications";
+import {
+  addBoss,
+  updateBoss,
+  markBossDead,
+  resetBossTimer,
+  deleteBoss,
+  saveNotificationSettings,
+} from "./services/bossService";
+import { minutesFromParts, partsFromMinutes } from "./utils/formatting";
+import {
+  getNotificationCache,
+  setNotificationCache,
+  safeShowNotification,
+  canUseNotificationConstructor,
+} from "./utils/notifications";
+import { defaultBosses } from "./utils/constants";
+import { Header } from "./components/Header";
+import { ErrorAlert } from "./components/ErrorAlert";
+import { AddBossForm } from "./components/AddBossForm";
+import { NotificationSettings } from "./components/NotificationSettings";
+import { BossList } from "./components/BossList";
 
 export default function App() {
-  const [bosses, setBosses] = useState(defaultBosses);
-  const [now, setNow] = useState(Date.now());
+  // Auth hooks
+  const {
+    user,
+    authLoading,
+    loggingIn,
+    loggingOut,
+    error: authError,
+    setError: setAuthError,
+    handleLogin,
+    handleLogout,
+  } = useAuth();
+
+  // Boss data hooks
+  const {
+    bosses,
+    computed,
+    stats,
+    loading: bossesLoading,
+    error: bossesError,
+    setError: setBossesError,
+    now,
+  } = useBosses();
+
+  // Notification hooks
+  const {
+    notifyLeadMinutes,
+    setNotifyLeadMinutes,
+    notificationPermission,
+    setNotificationPermission,
+    savingNotifications,
+    setSavingNotifications,
+    notificationMessage,
+    setNotificationMessage,
+    error: notificationError,
+    setError: setNotificationError,
+  } = useNotifications();
+
+  // Local form state
   const [name, setName] = useState("");
   const [map, setMap] = useState("");
-  const [respawn, setRespawn] = useState(60);
+  const [respawnDays, setRespawnDays] = useState(0);
+  const [respawnHours, setRespawnHours] = useState(1);
+  const [respawnMinutesPart, setRespawnMinutesPart] = useState(0);
+  const [search, setSearch] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState("");
+  const [editForm, setEditForm] = useState({ name: "", map: "", days: 0, hours: 0, minutes: 0 });
+  const [savingEditId, setSavingEditId] = useState("");
 
-  // load
+  // Notification effect
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) setBosses(JSON.parse(saved));
-  }, []);
+    if (!canUseNotificationConstructor()) return;
 
-  // save
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(bosses));
-  }, [bosses]);
+    const cache = getNotificationCache();
+    let changed = false;
 
-  // timer
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+    computed.forEach((boss) => {
+      try {
+        if (!boss.lastKilledAt || boss.spawnAt === null) return;
 
-  const computed = useMemo(() => {
-    return bosses.map((b) => {
-      const respawnMs = b.respawnMinutes * 60000;
-      const spawnAt = b.lastKilledAt ? b.lastKilledAt + respawnMs : null;
-      const remaining = spawnAt ? Math.max(spawnAt - now, 0) : null;
-      const spawned = spawnAt ? now >= spawnAt : false;
-      return { ...b, spawnAt, remaining, spawned };
+        const notifyAt = boss.spawnAt - notifyLeadMinutes * 60 * 1000;
+        const cacheKey = `${boss.id}:${boss.lastKilledAt}:${notifyLeadMinutes}`;
+
+        if (boss.spawned) {
+          if (cache[cacheKey] !== "spawned") {
+            safeShowNotification(`${boss.name} is up`, `${boss.name} at ${boss.map} is now spawned.`);
+            cache[cacheKey] = "spawned";
+            changed = true;
+          }
+          return;
+        }
+
+        if (now >= notifyAt && now < boss.spawnAt && !cache[cacheKey]) {
+          safeShowNotification(
+            `${boss.name} spawning soon`,
+            `${boss.name} at ${boss.map} will spawn in ${notifyLeadMinutes} minute(s).`
+          );
+          cache[cacheKey] = "soon";
+          changed = true;
+        }
+      } catch (effectError) {
+        console.error("Boss notification effect failed:", effectError);
+      }
     });
-  }, [bosses, now]);
 
-  const addBoss = () => {
-    if (!name) return;
-    setBosses([
-      ...bosses,
-      {
-        id: Date.now(),
-        name,
-        map,
-        respawnMinutes: Number(respawn),
-        lastKilledAt: null,
-      },
-    ]);
-    setName("");
-    setMap("");
+    if (changed) {
+      setNotificationCache(cache);
+    }
+  }, [computed, now, notifyLeadMinutes]);
+
+  // Helper functions
+  const requireAuth = () => {
+    if (user) return true;
+    setAuthError("Sign in with Google to add or edit bosses.");
+    return false;
   };
 
-  const markDead = (id) => {
-    setBosses(bosses.map((b) => (b.id === id ? { ...b, lastKilledAt: Date.now() } : b)));
+  // Boss operations
+  const handleAddBoss = async () => {
+    if (!requireAuth()) return;
+    if (!name.trim()) return;
+
+    try {
+      setSubmitting(true);
+      setAuthError("");
+
+      await addBoss(
+        {
+          name: name.trim(),
+          map: map.trim() || "Unknown Area",
+          respawnMinutes: minutesFromParts(respawnDays, respawnHours, respawnMinutesPart),
+          lastKilledAt: null,
+        },
+        user.uid
+      );
+
+      setName("");
+      setMap("");
+      setRespawnDays(0);
+      setRespawnHours(1);
+      setRespawnMinutesPart(0);
+    } catch (addError) {
+      console.error(addError);
+      setAuthError("Failed to add boss.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const reset = (id) => {
-    setBosses(bosses.map((b) => (b.id === id ? { ...b, lastKilledAt: null } : b)));
+  const handleStartEdit = (boss) => {
+    if (!requireAuth()) return;
+    const parts = partsFromMinutes(boss.respawnMinutes);
+    setEditingId(boss.id);
+    setEditForm({
+      name: boss.name,
+      map: boss.map,
+      days: parts.days,
+      hours: parts.hours,
+      minutes: parts.minutes,
+    });
   };
 
-  const remove = (id) => {
-    setBosses(bosses.filter((b) => b.id !== id));
+  const handleCancelEdit = () => {
+    setEditingId("");
+    setEditForm({ name: "", map: "", days: 0, hours: 0, minutes: 0 });
   };
+
+  const handleSaveEdit = async (id) => {
+    if (!requireAuth()) return;
+    if (!editForm.name.trim()) return;
+
+    try {
+      setSavingEditId(id);
+      setAuthError("");
+      await updateBoss(
+        id,
+        {
+          name: editForm.name.trim(),
+          map: editForm.map.trim() || "Unknown Area",
+          respawnMinutes: minutesFromParts(editForm.days, editForm.hours, editForm.minutes),
+        },
+        user.uid
+      );
+      handleCancelEdit();
+    } catch (updateError) {
+      console.error(updateError);
+      setAuthError("Failed to save boss changes.");
+    } finally {
+      setSavingEditId("");
+    }
+  };
+
+  const handleMarkDead = async (id) => {
+    if (!requireAuth()) return;
+    try {
+      setAuthError("");
+      await markBossDead(id, user.uid);
+    } catch (updateError) {
+      console.error(updateError);
+      setAuthError("Failed to update boss timer.");
+    }
+  };
+
+  const handleReset = async (id) => {
+    if (!requireAuth()) return;
+    try {
+      setAuthError("");
+      await resetBossTimer(id, user.uid);
+    } catch (updateError) {
+      console.error(updateError);
+      setAuthError("Failed to reset boss timer.");
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!requireAuth()) return;
+    try {
+      setAuthError("");
+      await deleteBoss(id);
+    } catch (deleteError) {
+      console.error(deleteError);
+      setAuthError("Failed to delete boss.");
+    }
+  };
+
+  const handleEnableBrowserNotifications = async () => {
+    if (!canUseNotificationConstructor()) {
+      setAuthError("This device or browser does not support notifications.");
+      return;
+    }
+
+    try {
+      setSavingNotifications(true);
+      setNotificationMessage("");
+      setAuthError("");
+
+      const result = await Notification.requestPermission();
+      setNotificationPermission(result);
+
+      if (result !== "granted") {
+        setAuthError("Notification permission was not granted.");
+        return;
+      }
+
+      await saveNotificationSettings(notifyLeadMinutes, user?.uid ?? null);
+      setNotificationMessage("Browser notifications enabled for this device.");
+    } catch (notificationSaveError) {
+      console.error(notificationSaveError);
+      setAuthError("Failed to enable browser notifications.");
+    } finally {
+      setSavingNotifications(false);
+    }
+  };
+
+  const handleSaveNotificationLeadTime = async () => {
+    try {
+      setSavingNotifications(true);
+      setNotificationMessage("");
+      setAuthError("");
+
+      await saveNotificationSettings(notifyLeadMinutes, user?.uid ?? null);
+      setNotificationMessage("Notification timing saved.");
+    } catch (notificationSaveError) {
+      console.error(notificationSaveError);
+      setAuthError("Failed to save notification timing.");
+    } finally {
+      setSavingNotifications(false);
+    }
+  };
+
+  const handleSeedDefaults = async () => {
+    if (!requireAuth()) return;
+    if (bosses.length > 0) return;
+
+    try {
+      setSubmitting(true);
+      setAuthError("");
+
+      for (const boss of defaultBosses) {
+        await addBoss(boss, user.uid);
+      }
+    } catch (seedError) {
+      console.error(seedError);
+      setAuthError("Failed to seed default bosses.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Filter computed bosses by search
+  const filteredBosses = computed.filter((b) => {
+    const term = search.trim().toLowerCase();
+    if (!term) return true;
+    return b.name.toLowerCase().includes(term) || b.map.toLowerCase().includes(term);
+  });
+
+  const error = authError || bossesError || notificationError;
 
   return (
-    <div className="min-h-screen bg-slate-100 p-4">
-      <h1 className="text-xl font-bold mb-4">Field Boss Timer</h1>
+    <div className="h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white overflow-hidden flex flex-col">
+      <div className="mx-auto max-w-6xl p-4 md:p-6 flex flex-col flex-1 w-full min-h-0">
+        <Header
+          stats={stats}
+          user={user}
+          authLoading={authLoading}
+          loggingIn={loggingIn}
+          loggingOut={loggingOut}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+        />
 
-      {/* Add Boss */}
-      <div className="bg-white p-4 rounded-xl mb-4 shadow">
-        <h2 className="font-semibold mb-2">Add Boss</h2>
-        <div className="flex flex-col gap-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Boss name" className="border p-2 rounded" />
-          <input value={map} onChange={(e) => setMap(e.target.value)} placeholder="Map" className="border p-2 rounded" />
-          <input type="number" value={respawn} onChange={(e) => setRespawn(e.target.value)} placeholder="Respawn (min)" className="border p-2 rounded" />
-          <button onClick={addBoss} className="bg-black text-white p-2 rounded">Add</button>
+        <ErrorAlert error={error} />
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[340px_1fr] flex-1 min-h-0 grid-cols-1 overflow-hidden">
+          <div className="flex flex-col gap-4 overflow-y-auto pr-2 min-h-0 scroll-wrapper hidden lg:flex">
+            <AddBossForm
+              user={user}
+              name={name}
+              setName={setName}
+              map={map}
+              setMap={setMap}
+              respawnDays={respawnDays}
+              setRespawnDays={setRespawnDays}
+              respawnHours={respawnHours}
+              setRespawnHours={setRespawnHours}
+              respawnMinutesPart={respawnMinutesPart}
+              setRespawnMinutesPart={setRespawnMinutesPart}
+              bosses={bosses}
+              submitting={submitting}
+              onAddBoss={handleAddBoss}
+              onSeedDefaults={handleSeedDefaults}
+            />
+
+            <NotificationSettings
+              user={user}
+              notifyLeadMinutes={notifyLeadMinutes}
+              setNotifyLeadMinutes={setNotifyLeadMinutes}
+              notificationPermission={notificationPermission}
+              savingNotifications={savingNotifications}
+              notificationMessage={notificationMessage}
+              onEnableBrowserNotifications={handleEnableBrowserNotifications}
+              onSaveNotificationLeadTime={handleSaveNotificationLeadTime}
+            />
+          </div>
+
+          <BossList
+            computed={filteredBosses}
+            user={user}
+            loading={bossesLoading}
+            search={search}
+            setSearch={setSearch}
+            editingId={editingId}
+            editForm={editForm}
+            setEditForm={setEditForm}
+            savingEditId={savingEditId}
+            onStartEdit={handleStartEdit}
+            onCancelEdit={handleCancelEdit}
+            onSaveEdit={handleSaveEdit}
+            onMarkDead={handleMarkDead}
+            onReset={handleReset}
+            onDelete={handleDelete}
+          />
         </div>
       </div>
-
-      {/* Boss List */}
-      {computed.map((b) => (
-        <div key={b.id} className="bg-white p-4 mb-3 rounded-xl shadow">
-          <div className="flex justify-between">
-            <div>
-              <h2 className="font-bold">{b.name}</h2>
-              <p className="text-sm text-gray-500">{b.map}</p>
-            </div>
-            <span className={`text-xs px-2 py-1 rounded ${b.spawned ? "bg-green-200" : "bg-gray-200"}`}>
-              {b.spawned ? "Spawned" : "Waiting"}
-            </span>
-          </div>
-
-          <div className="mt-2 text-sm">
-            <p>Respawn: {b.respawnMinutes} min</p>
-            <p>Remaining: {b.remaining === null ? "Not started" : formatDuration(b.remaining)}</p>
-            <p>Spawn At: {formatTime(b.spawnAt)}</p>
-          </div>
-
-          <div className="flex gap-2 mt-2">
-            <button onClick={() => markDead(b.id)} className="bg-black text-white px-2 py-1 rounded">Dead</button>
-            <button onClick={() => reset(b.id)} className="bg-gray-200 px-2 py-1 rounded">Reset</button>
-            <button onClick={() => remove(b.id)} className="bg-red-200 px-2 py-1 rounded">Delete</button>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

@@ -1,0 +1,112 @@
+import { db } from "../firebase";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
+
+export function subscribeToBosses(callback, onError) {
+  const bossesRef = collection(db, "bosses");
+  const bossesQuery = query(bossesRef, orderBy("createdAt", "asc"));
+
+  const unsubscribe = onSnapshot(
+    bossesQuery,
+    (snapshot) => {
+      const items = snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          name: data.name ?? "Unknown Boss",
+          map: data.map ?? "Unknown Area",
+          respawnMinutes: Number(data.respawnMinutes) || 60,
+          lastKilledAt: typeof data.lastKilledAt === "number" ? data.lastKilledAt : null,
+        };
+      });
+      callback(items);
+    },
+    onError
+  );
+
+  return unsubscribe;
+}
+
+export async function addBoss(bossData, userId) {
+  try {
+    await addDoc(collection(db, "bosses"), {
+      ...bossData,
+      createdAt: serverTimestamp(),
+      createdBy: userId,
+    });
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+export async function updateBoss(bossId, updates, userId) {
+  try {
+    await updateDoc(doc(db, "bosses", bossId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+      updatedBy: userId,
+    });
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+export async function markBossDead(bossId, userId) {
+  return updateBoss(bossId, { lastKilledAt: Date.now() }, userId);
+}
+
+export async function resetBossTimer(bossId, userId) {
+  return updateBoss(bossId, { lastKilledAt: null }, userId);
+}
+
+export async function deleteBoss(bossId) {
+  try {
+    await deleteDoc(doc(db, "bosses", bossId));
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
+
+export function subscribeToNotificationSettings(callback, onError) {
+  const notificationRef = doc(db, "settings", "notifications");
+
+  const unsubscribe = onSnapshot(notificationRef, (snapshot) => {
+    const data = snapshot.data();
+    if (!data) return;
+    callback({
+      leadMinutes: Number(data.leadMinutes) || 5,
+    });
+  }, onError);
+
+  return unsubscribe;
+}
+
+export async function saveNotificationSettings(leadMinutes, userId) {
+  try {
+    await setDoc(
+      doc(db, "settings", "notifications"),
+      {
+        leadMinutes: Number(leadMinutes) || 5,
+        updatedAt: serverTimestamp(),
+        updatedBy: userId ?? null,
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+}
