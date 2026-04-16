@@ -11,6 +11,7 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
+import { cacheUserEmail } from "./userService";
 
 export function subscribeToBosses(callback, onError) {
   const bossesRef = collection(db, "bosses");
@@ -23,10 +24,16 @@ export function subscribeToBosses(callback, onError) {
         const data = item.data();
         return {
           id: item.id,
+          type: data.type ?? "timer",
           name: data.name ?? "Unknown Boss",
           map: data.map ?? "Unknown Area",
           respawnMinutes: Number(data.respawnMinutes) || 60,
           lastKilledAt: typeof data.lastKilledAt === "number" ? data.lastKilledAt : null,
+          spawnSchedule: data.spawnSchedule ?? [],
+          createdBy: data.createdBy ?? null,
+          createdAt: data.createdAt?.toMillis?.() ?? null,
+          updatedBy: data.updatedBy ?? null,
+          updatedAt: data.updatedAt?.toMillis?.() ?? null,
         };
       });
       callback(items);
@@ -69,6 +76,10 @@ export async function markBossDead(bossId, userId) {
 
 export async function resetBossTimer(bossId, userId) {
   return updateBoss(bossId, { lastKilledAt: null }, userId);
+}
+
+export async function updateLastKill(bossId, lastKilledAt, userId) {
+  return updateBoss(bossId, { lastKilledAt: lastKilledAt ? Number(lastKilledAt) : null }, userId);
 }
 
 export async function deleteBoss(bossId) {

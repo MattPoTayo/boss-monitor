@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { subscribeToBosses } from "../services/bossService";
+import { calculateNextScheduledSpawn } from "../utils/scheduleUtils";
 
 export function useBosses() {
   const [bosses, setBosses] = useState([]);
@@ -32,10 +33,23 @@ export function useBosses() {
   const computed = useMemo(() => {
     return bosses
       .map((b) => {
-        const respawnMs = b.respawnMinutes * 60000;
-        const spawnAt = b.lastKilledAt ? b.lastKilledAt + respawnMs : null;
-        const remaining = spawnAt ? Math.max(spawnAt - now, 0) : null;
-        const spawned = spawnAt ? now >= spawnAt : false;
+        let spawnAt = null;
+        let remaining = null;
+        let spawned = false;
+
+        if (b.type === 'scheduled') {
+          // For scheduled bosses, calculate next spawn from schedule
+          spawnAt = calculateNextScheduledSpawn(b.spawnSchedule);
+          remaining = spawnAt ? Math.max(spawnAt - now, 0) : null;
+          spawned = false;
+        } else {
+          // For timer-based bosses
+          const respawnMs = b.respawnMinutes * 60000;
+          spawnAt = b.lastKilledAt ? b.lastKilledAt + respawnMs : null;
+          remaining = spawnAt ? Math.max(spawnAt - now, 0) : null;
+          spawned = spawnAt ? now >= spawnAt : false;
+        }
+
         return { ...b, spawnAt, remaining, spawned };
       });
   }, [bosses, now]);
@@ -43,10 +57,18 @@ export function useBosses() {
   const stats = useMemo(() => {
     const total = bosses.length;
     const spawned = bosses.filter((b) => {
+      if (b.type === 'scheduled') {
+        return false;
+      }
       if (!b.lastKilledAt) return false;
       return now >= b.lastKilledAt + b.respawnMinutes * 60000;
     }).length;
-    const active = bosses.filter((b) => b.lastKilledAt).length;
+    const active = bosses.filter((b) => {
+      if (b.type === 'scheduled') {
+        return true;
+      }
+      return b.lastKilledAt;
+    }).length;
     return { total, spawned, active };
   }, [bosses, now]);
 

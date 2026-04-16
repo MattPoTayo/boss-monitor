@@ -7,6 +7,7 @@ import {
   signInWithPopup,
   signOut,
 } from "firebase/auth";
+import { cacheUserEmail, saveUserInfo, isUserAdmin, cacheUserAdminStatus } from "./userService";
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -24,7 +25,23 @@ export async function initializeAuth() {
 }
 
 export function setupAuthListener(callback) {
-  const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+  const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
+    if (nextUser) {
+      try {
+        // Cache the user's email for display purposes
+        cacheUserEmail(nextUser.uid, nextUser.email);
+        // Save user info to Firestore
+        await saveUserInfo(nextUser.uid, nextUser.email, nextUser.displayName);
+        // Check and cache admin status
+        const isAdmin = await isUserAdmin(nextUser.uid);
+        cacheUserAdminStatus(nextUser.uid, isAdmin);
+        console.log("User authenticated:", nextUser.email, "Admin:", isAdmin);
+      } catch (error) {
+        console.error("Error during auth listener setup:", error);
+      }
+    } else {
+      console.log("User logged out");
+    }
     callback(nextUser || auth.currentUser || null);
   });
   return unsubscribe;

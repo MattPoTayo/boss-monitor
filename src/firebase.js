@@ -18,3 +18,10 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Verify Firebase is initialized
+if (firebaseConfig.projectId) {
+  console.log("✓ Firebase initialized for project:", firebaseConfig.projectId);
+} else {
+  console.error("✗ Firebase config incomplete - check .env.local");
+}

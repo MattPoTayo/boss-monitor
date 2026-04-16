@@ -7,10 +7,12 @@ import {
   updateBoss,
   markBossDead,
   resetBossTimer,
+  updateLastKill,
   deleteBoss,
   saveNotificationSettings,
 } from "./services/bossService";
 import { minutesFromParts, partsFromMinutes } from "./utils/formatting";
+import { cacheUserEmail } from "./services/userService";
 import {
   getNotificationCache,
   setNotificationCache,
@@ -20,8 +22,7 @@ import {
 import { defaultBosses } from "./utils/constants";
 import { Header } from "./components/Header";
 import { ErrorAlert } from "./components/ErrorAlert";
-import { AddBossForm } from "./components/AddBossForm";
-import { NotificationSettings } from "./components/NotificationSettings";
+import { ControlsSidebar } from "./components/ControlsSidebar";
 import { BossList } from "./components/BossList";
 
 export default function App() {
@@ -73,6 +74,24 @@ export default function App() {
   const [editingId, setEditingId] = useState("");
   const [editForm, setEditForm] = useState({ name: "", map: "", days: 0, hours: 0, minutes: 0 });
   const [savingEditId, setSavingEditId] = useState("");
+
+  // Scheduled boss form state
+  const [scheduledName, setScheduledName] = useState("");
+  const [scheduledMap, setScheduledMap] = useState("");
+
+  // Sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Last kill adjustment state
+  const [adjustingKillId, setAdjustingKillId] = useState("");
+  const [adjustingKillTime, setAdjustingKillTime] = useState("");
+
+  // Cache current user's email for display
+  useEffect(() => {
+    if (user?.email) {
+      cacheUserEmail(user.uid, user.email);
+    }
+  }, [user?.uid, user?.email]);
 
   // Notification effect
   useEffect(() => {
@@ -154,9 +173,28 @@ export default function App() {
     }
   };
 
+  const handleAddScheduledBoss = async (scheduledBossData) => {
+    if (!requireAuth()) return;
+
+    try {
+      setSubmitting(true);
+      setAuthError("");
+
+      await addBoss(scheduledBossData, user.uid);
+
+      setScheduledName("");
+      setScheduledMap("");
+    } catch (addError) {
+      console.error(addError);
+      setAuthError("Failed to add scheduled boss.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleStartEdit = (boss) => {
     if (!requireAuth()) return;
-    const parts = partsFromMinutes(boss.respawnMinutes);
+    const parts = partsFromMinutes(boss.respawnMinutes || 60);
     setEditingId(boss.id);
     setEditForm({
       name: boss.name,
@@ -227,6 +265,29 @@ export default function App() {
     } catch (deleteError) {
       console.error(deleteError);
       setAuthError("Failed to delete boss.");
+    }
+  };
+
+  const handleStartAdjustKill = (boss) => {
+    setAdjustingKillId(boss.id);
+    setAdjustingKillTime(boss.lastKilledAt ? new Date(boss.lastKilledAt).toISOString().slice(0, 16) : "");
+  };
+
+  const handleCancelAdjustKill = () => {
+    setAdjustingKillId("");
+    setAdjustingKillTime("");
+  };
+
+  const handleSaveAdjustKill = async (id) => {
+    if (!requireAuth()) return;
+    try {
+      setAuthError("");
+      const newTime = adjustingKillTime ? new Date(adjustingKillTime).getTime() : null;
+      await updateLastKill(id, newTime, user.uid);
+      handleCancelAdjustKill();
+    } catch (adjustError) {
+      console.error(adjustError);
+      setAuthError("Failed to adjust kill time.");
     }
   };
 
@@ -318,55 +379,77 @@ export default function App() {
 
         <ErrorAlert error={error} />
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[340px_1fr] flex-1 min-h-0 grid-cols-1 overflow-hidden">
-          <div className="flex flex-col gap-4 overflow-y-auto pr-2 min-h-0 scroll-wrapper hidden lg:flex">
-            <AddBossForm
-              user={user}
-              name={name}
-              setName={setName}
-              map={map}
-              setMap={setMap}
-              respawnDays={respawnDays}
-              setRespawnDays={setRespawnDays}
-              respawnHours={respawnHours}
-              setRespawnHours={setRespawnHours}
-              respawnMinutesPart={respawnMinutesPart}
-              setRespawnMinutesPart={setRespawnMinutesPart}
-              bosses={bosses}
-              submitting={submitting}
-              onAddBoss={handleAddBoss}
-              onSeedDefaults={handleSeedDefaults}
-            />
+        {/* Mobile Sidebar Toggle */}
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="lg:hidden mt-4 mb-4 w-full rounded-lg bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:bg-cyan-500"
+        >
+          {sidebarOpen ? "Close Controls" : "Open Controls ☰"}
+        </button>
 
-            <NotificationSettings
+        {/* Main Content: Sidebar + Boss List */}
+        <div className="flex gap-4 flex-1 min-h-0">
+          {/* Sidebar */}
+          <ControlsSidebar
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            user={user}
+            bosses={bosses}
+            computed={computed}
+            now={now}
+            name={name}
+            setName={setName}
+            map={map}
+            setMap={setMap}
+            respawnDays={respawnDays}
+            setRespawnDays={setRespawnDays}
+            respawnHours={respawnHours}
+            setRespawnHours={setRespawnHours}
+            respawnMinutesPart={respawnMinutesPart}
+            setRespawnMinutesPart={setRespawnMinutesPart}
+            submitting={submitting}
+            onAddBoss={handleAddBoss}
+            onSeedDefaults={handleSeedDefaults}
+            scheduledName={scheduledName}
+            setScheduledName={setScheduledName}
+            scheduledMap={scheduledMap}
+            setScheduledMap={setScheduledMap}
+            onAddScheduledBoss={handleAddScheduledBoss}
+            notifyLeadMinutes={notifyLeadMinutes}
+            setNotifyLeadMinutes={setNotifyLeadMinutes}
+            notificationPermission={notificationPermission}
+            savingNotifications={savingNotifications}
+            notificationMessage={notificationMessage}
+            onEnableBrowserNotifications={handleEnableBrowserNotifications}
+            onSaveNotificationLeadTime={handleSaveNotificationLeadTime}
+          />
+
+          {/* Boss List */}
+          <div className="flex-1 min-h-0">
+            <BossList
+              computed={filteredBosses}
               user={user}
-              notifyLeadMinutes={notifyLeadMinutes}
-              setNotifyLeadMinutes={setNotifyLeadMinutes}
-              notificationPermission={notificationPermission}
-              savingNotifications={savingNotifications}
-              notificationMessage={notificationMessage}
-              onEnableBrowserNotifications={handleEnableBrowserNotifications}
-              onSaveNotificationLeadTime={handleSaveNotificationLeadTime}
+              loading={bossesLoading}
+              search={search}
+              setSearch={setSearch}
+              editingId={editingId}
+              editForm={editForm}
+              setEditForm={setEditForm}
+              savingEditId={savingEditId}
+              onStartEdit={handleStartEdit}
+              onCancelEdit={handleCancelEdit}
+              onSaveEdit={handleSaveEdit}
+              onMarkDead={handleMarkDead}
+              onReset={handleReset}
+              onDelete={handleDelete}
+              adjustingKillId={adjustingKillId}
+              adjustingKillTime={adjustingKillTime}
+              setAdjustingKillTime={setAdjustingKillTime}
+              onStartAdjustKill={handleStartAdjustKill}
+              onCancelAdjustKill={handleCancelAdjustKill}
+              onSaveAdjustKill={handleSaveAdjustKill}
             />
           </div>
-
-          <BossList
-            computed={filteredBosses}
-            user={user}
-            loading={bossesLoading}
-            search={search}
-            setSearch={setSearch}
-            editingId={editingId}
-            editForm={editForm}
-            setEditForm={setEditForm}
-            savingEditId={savingEditId}
-            onStartEdit={handleStartEdit}
-            onCancelEdit={handleCancelEdit}
-            onSaveEdit={handleSaveEdit}
-            onMarkDead={handleMarkDead}
-            onReset={handleReset}
-            onDelete={handleDelete}
-          />
         </div>
       </div>
     </div>
