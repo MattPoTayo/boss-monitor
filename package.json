@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://MattPoTayo.github.io/boss-monitor",
+  "homepage": "https://mattpotayo.github.io/boss-monitor",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
