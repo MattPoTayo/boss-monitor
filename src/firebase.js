@@ -2,17 +2,15 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCm66mOX3dtcJHwy_V_O5U_7nXNgSf4HbU",
-  authDomain: "boss-monitor-3f077.firebaseapp.com",
-  projectId: "boss-monitor-3f077",
-  storageBucket: "boss-monitor-3f077.firebasestorage.app",
-  messagingSenderId: "355825422129",
-  appId: "1:355825422129:web:dcccc3b1b04749858cea10"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 // Initialize Firebase
