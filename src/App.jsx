@@ -6,7 +6,9 @@ import {
   addBoss,
   updateBoss,
   markBossDead,
+  markBossDeadAuto,
   resetBossTimer,
+  recordBossSpawn,
   updateLastKill,
   deleteBoss,
   saveNotificationSettings,
@@ -86,6 +88,9 @@ export default function App() {
   const [adjustingKillId, setAdjustingKillId] = useState("");
   const [adjustingKillTime, setAdjustingKillTime] = useState("");
 
+  // Track which bosses we've recorded as spawned for auto-marking
+  const [recordedSpawns, setRecordedSpawns] = useState(new Set());
+
   // Cache current user's email for display
   useEffect(() => {
     if (user?.email) {
@@ -133,6 +138,44 @@ export default function App() {
       setNotificationCache(cache);
     }
   }, [computed, now, notifyLeadMinutes]);
+
+  // Auto-mark boss as dead after 2 minutes of spawning
+  useEffect(() => {
+    const AUTO_SPAWN_TIMEOUT = 2 * 60 * 1000; // 2 minutes in milliseconds
+
+    computed.forEach((boss) => {
+      try {
+        // Only process timer-based bosses that are spawned
+        if (boss.type === 'scheduled' || !boss.spawned) return;
+
+        const spawnId = boss.id;
+
+        // If this boss just spawned (spawned but not yet recorded), record it
+        if (!recordedSpawns.has(spawnId) && !boss.autoSpawnedAt) {
+          setRecordedSpawns((prev) => new Set([...prev, spawnId]));
+          recordBossSpawn(spawnId, user?.uid).catch((err) => {
+            console.error("Failed to record boss spawn:", err);
+          });
+          return;
+        }
+
+        // If boss has been spawned for >= 2 minutes and still alive, auto-mark it dead
+        if (boss.autoSpawnedAt && now - boss.autoSpawnedAt >= AUTO_SPAWN_TIMEOUT) {
+          markBossDeadAuto(spawnId, user?.uid).catch((err) => {
+            console.error("Failed to auto-mark boss as dead:", err);
+          });
+          // Remove from tracked set so we don't try again
+          setRecordedSpawns((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(spawnId);
+            return newSet;
+          });
+        }
+      } catch (effectError) {
+        console.error("Auto-mark boss effect failed:", effectError);
+      }
+    });
+  }, [computed, now, user?.uid, recordedSpawns]);
 
   // Helper functions
   const requireAuth = () => {

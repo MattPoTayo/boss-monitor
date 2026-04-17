@@ -69,9 +69,16 @@ export function BossCard({
               )}
             </div>
           </div>
-          <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap flex-shrink-0 sm:px-3 sm:py-1 sm:text-sm ${status.badge}`}>
-            {status.label}
-          </span>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {boss.isAutoRenewed && (
+              <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-300 whitespace-nowrap sm:px-3 sm:py-1 sm:text-sm" title="Boss was automatically renewed after 2 minutes of spawn">
+                Auto Renewed
+              </span>
+            )}
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap sm:px-3 sm:py-1 sm:text-sm ${status.badge}`}>
+              {status.label}
+            </span>
+          </div>
         </div>
       </button>
 

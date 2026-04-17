@@ -34,6 +34,8 @@ export function subscribeToBosses(callback, onError) {
           createdAt: data.createdAt?.toMillis?.() ?? null,
           updatedBy: data.updatedBy ?? null,
           updatedAt: data.updatedAt?.toMillis?.() ?? null,
+          autoSpawnedAt: typeof data.autoSpawnedAt === "number" ? data.autoSpawnedAt : null,
+          isAutoRenewed: data.isAutoRenewed ?? false,
         };
       });
       callback(items);
@@ -71,11 +73,21 @@ export async function updateBoss(bossId, updates, userId) {
 }
 
 export async function markBossDead(bossId, userId) {
-  return updateBoss(bossId, { lastKilledAt: Date.now() }, userId);
+  return updateBoss(bossId, { lastKilledAt: Date.now(), autoSpawnedAt: null, isAutoRenewed: false }, userId);
+}
+
+export async function markBossDeadAuto(bossId, userId) {
+  // Mark dead automatically after 2 minutes of spawn
+  return updateBoss(bossId, { lastKilledAt: Date.now(), autoSpawnedAt: null, isAutoRenewed: true }, userId);
+}
+
+export async function recordBossSpawn(bossId, userId) {
+  // Record when a boss becomes spawned (for auto-marking tracking)
+  return updateBoss(bossId, { autoSpawnedAt: Date.now() }, userId);
 }
 
 export async function resetBossTimer(bossId, userId) {
-  return updateBoss(bossId, { lastKilledAt: null }, userId);
+  return updateBoss(bossId, { lastKilledAt: null, autoSpawnedAt: null, isAutoRenewed: false }, userId);
 }
 
 export async function updateLastKill(bossId, lastKilledAt, userId) {
