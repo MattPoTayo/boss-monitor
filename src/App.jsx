@@ -26,6 +26,8 @@ import { Header } from "./components/Header";
 import { ErrorAlert } from "./components/ErrorAlert";
 import { ControlsSidebar } from "./components/ControlsSidebar";
 import { BossList } from "./components/BossList";
+import { UserManagement } from "./components/UserManagement";
+import { useIsAdmin } from "./hooks/useIsAdmin";
 
 export default function App() {
   // Auth hooks
@@ -90,6 +92,12 @@ export default function App() {
 
   // Track which bosses we've recorded as spawned for auto-marking
   const [recordedSpawns, setRecordedSpawns] = useState(new Set());
+
+  // Page state (dashboard or user-management)
+  const [currentPage, setCurrentPage] = useState("dashboard");
+
+  // Admin check
+  const { isAdmin } = useIsAdmin(user?.uid);
 
   // Cache current user's email for display
   useEffect(() => {
@@ -418,17 +426,30 @@ export default function App() {
           loggingOut={loggingOut}
           onLogin={handleLogin}
           onLogout={handleLogout}
+          isAdmin={isAdmin}
+          onOpenUserManagement={() => setCurrentPage("user-management")}
         />
 
         <ErrorAlert error={error} />
 
-        {/* Mobile Sidebar Toggle */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="lg:hidden mt-4 mb-4 w-full rounded-lg bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:bg-cyan-500"
-        >
-          {sidebarOpen ? "Close Controls" : "Open Controls ☰"}
-        </button>
+        {/* User Management Page */}
+        {currentPage === "user-management" ? (
+          <div className="flex-1 min-h-0">
+            <UserManagement
+              user={user}
+              isAdmin={isAdmin}
+              onClose={() => setCurrentPage("dashboard")}
+            />
+          </div>
+        ) : (
+          <>
+            {/* Mobile Sidebar Toggle */}
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="lg:hidden mt-4 mb-4 w-full rounded-lg bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:bg-cyan-500"
+            >
+              {sidebarOpen ? "Close Controls" : "Open Controls ☰"}
+            </button>
 
         {/* Main Content: Sidebar + Boss List */}
         <div className="flex gap-4 flex-1 min-h-0">
@@ -494,6 +515,8 @@ export default function App() {
             />
           </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

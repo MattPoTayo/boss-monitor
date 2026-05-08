@@ -115,7 +115,7 @@ export function ControlsSidebar({
 
           <UpcomingBossesReport computed={computed} now={now} />
 
-          <DiscordIntegration computed={computed} now={now} />
+          <DiscordIntegration computed={computed} now={now} user={user} />
 
           <CalendarExport computed={computed} />
 

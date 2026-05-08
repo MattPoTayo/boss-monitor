@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BossCard } from "./BossCard";
 
 export function BossList({
@@ -24,11 +24,36 @@ export function BossList({
   onCancelAdjustKill,
   onSaveAdjustKill,
 }) {
-  // Initialize all cards as collapsed by default
+  // Initialize all cards as compact (collapsed) by default
   const [collapsedCards, setCollapsedCards] = useState(
     computed.reduce((acc, boss) => ({ ...acc, [boss.id]: true }), {})
   );
   const [activeTab, setActiveTab] = useState("timer"); // "timer" or "scheduled"
+
+  // Ensure new bosses are added to collapsedCards state as collapsed
+  useEffect(() => {
+    setCollapsedCards((prev) => {
+      const updated = { ...prev };
+      let hasChanges = false;
+      
+      computed.forEach((boss) => {
+        if (!(boss.id in updated)) {
+          updated[boss.id] = true; // New bosses default to collapsed
+          hasChanges = true;
+        }
+      });
+      
+      // Remove bosses that no longer exist
+      Object.keys(updated).forEach((id) => {
+        if (!computed.find((b) => b.id === id)) {
+          delete updated[id];
+          hasChanges = true;
+        }
+      });
+      
+      return hasChanges ? updated : prev;
+    });
+  }, [computed]);
 
   const toggleCardCollapse = (bossId) => {
     setCollapsedCards((prev) => ({
